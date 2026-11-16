@@ -1,12 +1,14 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
+import semver from "semver";
 import tsupConfig from "../tsup.config";
 
 const desktopPackageJsonPath = resolve(import.meta.dirname, "../package.json");
 const devScriptPath = resolve(import.meta.dirname, "../scripts/dev.mjs");
 
 const desktopPackageJson = JSON.parse(readFileSync(desktopPackageJsonPath, "utf8")) as {
+  version?: string;
   scripts: Record<string, string | undefined>;
 };
 const devScriptSource = readFileSync(devScriptPath, "utf8");
@@ -40,5 +42,20 @@ describe("desktop dev startup ready state", () => {
     expect(devScriptSource).toContain('resolve(root, "out/.preload-build-ready")');
     expect(devScriptSource).toContain('resolve(root, "out/.extension-host-build-ready")');
     expect(devScriptSource).not.toContain("while (!existsSync(mainBundle))");
+  });
+
+  it("desktop shell package.json must declare a valid semver version, or Linux dev main process crashes at load", () => {
+    // Fix rationale: the top-level `const { autoUpdater } = pkg` in autoUpdater.ts
+    // constructs the electron-updater instance at module load time, and its
+    // constructor validates the version with semver.valid(app.getVersion()).
+    // On Linux in dev mode Electron cannot read bundle metadata and falls back to
+    // the shell package.json's `version` field; when the field is missing it
+    // returns "0.0" (invalid semver), so the main process throws
+    // "App version is not a valid semver version" during import and crashes
+    // (macOS/Windows read the Electron bundle's own version and are unaffected).
+    // Packaged apps get the product version injected via electron-builder's
+    // extraMetadata.version, so this value only needs to be valid semver and
+    // carries no product-version semantics.
+    expect(semver.valid(desktopPackageJson.version)).toBeTruthy();
   });
 });
